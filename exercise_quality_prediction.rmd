@@ -1,0 +1,144 @@
+---
+title: "Exercise Quality Prediction"
+author: "Drew Herring"
+date: "September 10, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, we will attempt to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the fashion in which the exercise was completed. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Getting, Cleaning and Exploratoration
+
+First, we set the seed to ensure reproducibility and then download the datasets. Libraries we will be using are: dplyr, caret, rpart, and randomForest.
+
+```{r echo=FALSE}
+#needed libraries
+suppressWarnings(suppressMessages(library(dplyr)))
+suppressWarnings(suppressMessages(library(caret)))
+suppressWarnings(suppressMessages(library(rpart)))
+suppressWarnings(suppressMessages(library(randomForest)))
+```
+
+
+```{r}
+set.seed(3)
+
+#download data
+if(!file.exists('pml-training.csv')){
+  download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', destfile = 'pml-training.csv')
+}
+if(!file.exists('pml-testing.csv')){
+  download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', destfile = 'pml-testing.csv')
+}
+
+#load data
+train_data = read.csv('pml-training.csv')
+test_data = read.csv('pml-testing.csv')
+
+#expolre data a bit
+#str(train_data)
+
+```
+
+After using the str() function on the training data, we see it contains 19,622 rows and 160 columns. The variable we would like to predict is 'classe', and the figure below show the different catagories with their distributions in the training dataset.
+
+
+```{r echo=FALSE}
+barplot(data.frame(table(train_data$classe))$Freq,
+        main="Classe Variable Frequency",xlab="Classe",ylab="Frequency",col='Blue')
+```
+
+There are also many 'NA' values within the dataset, and before we can use the data to build a prediction model we need to tidy up a bit. 
+
+The first few columns will also not make good predictors as they only help to describe the other variables. For example, they contain
+timestamp, user_name, etc.
+
+```{r}
+test_data %>% select_if(colSums(is.na(train_data)) == 0) -> test_data
+train_data %>% select_if(colSums(is.na(train_data)) == 0) -> train_data
+
+train_data %>% 
+  select(-c(X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window)) -> train_data
+test_data %>% 
+  select(-c(X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window)) -> test_data
+```
+
+
+## Modeling
+
+Before we begin building the model, it is important to split our training data into two sets in order to perform cross validation.
+For this exercise, we will be splitting the data 60/40, with 40% being used for evaluation of the model only. The training test partition will not be used to develop the model, and will only be for accessing accuracy of our model.
+
+```{r}
+train_par <- createDataPartition(y = train_data$classe, p = 0.60, list=FALSE)
+train_train <- train_data[train_par,]
+train_test <- train_data[-train_par,]
+```
+
+The new partition of training data resulted in 11,776 records for training, and 7,846 for testing.
+
+We want to also remove columns containing few unique values, as this could confound our model. For this we will be using the nearZeroVar function within the caret package.
+
+```{r}
+nzv_col <- nearZeroVar(train_train)
+train_train <- train_train[ , -nzv_col]
+train_test <- train_test[ , -nzv_col]
+test_data <- test_data[ , -nzv_col]
+```
+
+After removing variables with 'NA' values and variables with low variance, we are left with 53 remaining variables. Since the dataset is relatively small, we will attempt to build a model using all 53 variables and ensure we have an acceptable accuracy.
+
+##### Decision Tree Model
+
+Using our training partition data, we will attempt to build a decision tree model using all 53 variables, make predictions and check the accuracy.
+
+```{r}
+#build a decision tree model
+dt_pred_model <- rpart(classe ~ ., data = train_train, method = 'class')
+
+#make predictions with our testing subset of training data
+dt_pred_val <- predict(dt_pred_model, train_test, type = 'class')
+#check the accuracy of the model
+dt_conf_mat <- confusionMatrix(dt_pred_val, train_test$classe)
+```
+
+According to the confusion matrix (figure 1 in the appendix), the accuracy of the decision tree model is 75.8% with an out of sample error rate of 24.2%. 
+
+##### Random Forest Model
+
+Reusing our training partition data, we will attempt to build a random forest model using all 53 variables, make predictions and check the accuracy.
+
+```{r}
+#build a random forest model
+rf_pred_model <- randomForest(classe ~ ., data = train_train, ntree = 100, importance = TRUE)
+
+#make predictions with our testing subset of training data
+rf_pred_val <- predict(rf_pred_model, newdata = train_test)
+#check the accuracy of the model
+rf_conf_mat <- confusionMatrix(rf_pred_val, train_test$classe)
+```
+
+According to the confusion matrix (figure 2 in the appendix), the accuracy of the random forest model is 99.5% with an out of sample error rate of 0.5%.
+
+## Conclusion
+To predict on the classe variable we chose the random forest model as the accuracy is much higher than the decision tree model. We can now use  the actual test data and predict the fashion in which particpants completed the exercise.
+
+
+## Appendix
+#### Figure 1: Decision Tree Confusion Matrix 
+```{r echo=FALSE}
+print(dt_conf_mat)
+```
+
+#### Figure 2: Random Forest Confusion Matrix 
+```{r echo=FALSE}
+print(rf_conf_mat)
+```
